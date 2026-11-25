@@ -96,4 +96,39 @@ describe("runner", () => {
     expect(r.stopReason).toMatch(/max-usd/);
     expect(s.calls).toHaveLength(0);
   });
+
+  it("retried 429s count toward quota, sleep 20s, and a recovered session resets the breaker", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }], { tasks: ["t01", "t02"] });
+    const r429: ChatResult = { ok: false, status: 429, latencyMs: 1, rawText: "", json: { error: { message: "rate-limited" } } };
+    let first = true;
+    const r = await runBench(s.opts, s.mk((b) => {
+      if (first) { first = false; return r429; }
+      return b.messages.length === 2 ? toolCallRes() : answerRes();
+    }));
+    expect(s.calls).toHaveLength(5); // 1x429 + 2 for t01, 2 for t02
+    expect(JSON.parse(readFileSync(s.opts.quotaFile, "utf8"))["2026-11-24"]).toBe(5);
+    expect(s.sleeps).toContain(20000);
+    expect(r.stopped).toEqual({});
+    const [a, b] = s.lines();
+    expect(a!.rateLimitedAttempts).toBe(1);
+    expect(a!.firstOutcome).toBe("tool_called");
+    expect(b!.rateLimitedAttempts).toBe(0);
+  });
+
+  it("quota stop applies before each retry attempt", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }], { freeLimit: 2, tasks: ["t01"] });
+    const r429: ChatResult = { ok: false, status: 429, latencyMs: 1, rawText: "", json: { error: { message: "rate-limited" } } };
+    const r = await runBench(s.opts, s.mk(() => r429));
+    expect(s.calls).toHaveLength(2);
+    expect(r.stopReason).toMatch(/quota/);
+  });
+
+  it("breaker opens after 3 sessions that stay 429 after all retries", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }]);
+    const r429: ChatResult = { ok: false, status: 429, latencyMs: 1, rawText: "", json: { error: { message: "rate-limited" } } };
+    const r = await runBench(s.opts, s.mk(() => r429));
+    expect(Object.keys(r.stopped)).toEqual(["a/x:free"]);
+    expect(s.lines()).toHaveLength(3);
+    expect(s.calls).toHaveLength(12);
+  });
 });

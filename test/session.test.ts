@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runSession } from "../src/session.js";
 import { buildRequest } from "../src/conditions.js";
 import { TASKS } from "../src/tasks/index.js";
+import { isTransient } from "../src/classify.js";
 import type { ChatResult } from "../src/types.js";
 
 const task = TASKS[0]!;
@@ -60,5 +61,60 @@ describe("runSession", () => {
     const rec = await runSession({ chat: async () => answer }, { model: "m", condition: "schema-only", task, rep: 1 });
     expect(rec.e2eSuccess).toBeNull();
     expect(rec.toolCalled).toBe(false);
+  });
+
+  describe("429 retries", () => {
+    const r429 = (retryAfterSec?: number): ChatResult => ({ ok: false, status: 429, latencyMs: 5, rawText: "", json: { error: { message: "temporarily rate-limited upstream" } }, retryAfterSec });
+    const run = (replies: ChatResult[], condition: any = "schema-only") => {
+      const sleeps: number[] = [];
+      let calls = 0;
+      const p = runSession({ chat: async () => (calls++, replies.shift()!), sleep: async (ms) => void sleeps.push(ms) }, { model: "m", condition, task, rep: 1 });
+      return { p, sleeps, calls: () => calls };
+    };
+    it("429 then 200 on turn 1: right outcome, two request entries, sleeps 20000", async () => {
+      const t = run([r429(), toolCall, answer], "tools+schema");
+      const rec = await t.p;
+      expect(t.sleeps).toEqual([20000]);
+      expect(rec.requests).toHaveLength(3);
+      expect(rec.requests.map((q) => [q.status, q.attempt, q.retryOf])).toEqual([[429, 1, null], [200, 2, 0], [200, 1, null]]);
+      expect(rec.firstOutcome).toBe("tool_called");
+      expect(rec.rateLimitedAttempts).toBe(1);
+      expect(rec.e2eSuccess).toBe(true);
+      expect(rec.rawError).toBeNull();
+      expect(isTransient(rec)).toBe(false);
+    });
+    it("two requests when 429 then 200 on schema-only", async () => {
+      const t = run([r429(), answer]);
+      const rec = await t.p;
+      expect(rec.requests).toHaveLength(2);
+      expect(rec.firstOutcome).toBe("tool_missing");
+      expect(t.sleeps).toEqual([20000]);
+    });
+    it("200 body with error.code 429 is retried", async () => {
+      const body: ChatResult = { ok: true, status: 200, latencyMs: 1, rawText: "", json: { error: { code: 429, message: "rate" } } };
+      const t = run([body, answer]);
+      const rec = await t.p;
+      expect(rec.requests.map((q) => q.rateLimited)).toEqual([true, false]);
+      expect(rec.firstOutcome).toBe("tool_missing");
+    });
+    it("Retry-After: 5 sleeps 5000; capped at 60s", async () => {
+      const a = run([r429(5), answer]);
+      await a.p;
+      expect(a.sleeps).toEqual([5000]);
+      const b = run([r429(500), answer]);
+      await b.p;
+      expect(b.sleeps).toEqual([60000]);
+    });
+    it("4x429 is rate_limited and transient; sleeps 20/40/60 s", async () => {
+      const t = run([r429(), r429(), r429(), r429()]);
+      const rec = await t.p;
+      expect(t.calls()).toBe(4);
+      expect(t.sleeps).toEqual([20000, 40000, 60000]);
+      expect(rec.firstOutcome).toBe("rate_limited");
+      expect(rec.rateLimitedAttempts).toBe(4);
+      expect(rec.requests.map((q) => q.attempt)).toEqual([1, 2, 3, 4]);
+      expect(rec.requests.map((q) => q.retryOf)).toEqual([null, 0, 1, 2]);
+      expect(isTransient(rec)).toBe(true);
+    });
   });
 });

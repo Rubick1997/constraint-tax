@@ -54,6 +54,12 @@ export interface RequestRecord {
   errorMessage: string | null;
   providerName: string | null;
   retryAfterSec: number | null;
+  /** 1-based attempt number for this logical request (1 = first try). */
+  attempt: number;
+  /** Index in `requests` of the 429 attempt this one retries, or null. */
+  retryOf: number | null;
+  /** True for HTTP 429 or a 200 body whose error.code is 429. */
+  rateLimited: boolean;
 }
 
 export interface SessionRecord {
@@ -73,6 +79,8 @@ export interface SessionRecord {
   schemaValid: boolean;
   answerCorrect: boolean;
   e2eSuccess: boolean | null;
+  /** Number of HTTP attempts (across all turns) that were rate limited (429). */
+  rateLimitedAttempts: number;
   totalLatencyMs: number;
   totalCostUsd: number;
   finalContent: string;

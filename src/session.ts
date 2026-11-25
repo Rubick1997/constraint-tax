@@ -1,10 +1,13 @@
 import { Ajv } from "ajv";
 import { buildRequest } from "./conditions.js";
-import { classifyFirst, extractErrorMessage } from "./classify.js";
+import { classifyFirst, extractErrorMessage, is429 } from "./classify.js";
 import type { ChatResult, Condition, RequestRecord, SessionRecord, Task } from "./types.js";
 import { sessionKey } from "./types.js";
 
 export const MAX_TURNS = 4;
+/** Waits before retry 1, 2, 3 of a rate-limited (429) request. */
+export const RETRY_DELAYS_MS = [20_000, 40_000, 60_000];
+export const MAX_RETRY_AFTER_MS = 60_000;
 const ajv = new Ajv({ strict: false });
 
 export interface Pricing {
@@ -15,6 +18,7 @@ export interface Pricing {
 export interface SessionDeps {
   chat: (body: any) => Promise<ChatResult>;
   now?: () => number;
+  sleep?: (ms: number) => Promise<void>; // used for 429 backoff; injectable for tests
   pricing?: Pricing; // fallback when response has no usage.cost
 }
 
@@ -61,7 +65,12 @@ function requestCost(r: ChatResult, pricing?: Pricing): number | null {
   return null;
 }
 
-function toRequestRecord(r: ChatResult, pricing?: Pricing): RequestRecord {
+function retryDelayMs(attempt: number, r: ChatResult): number {
+  if (r.retryAfterSec && r.retryAfterSec > 0) return Math.min(r.retryAfterSec * 1000, MAX_RETRY_AFTER_MS);
+  return RETRY_DELAYS_MS[attempt - 1]!;
+}
+
+function toRequestRecord(r: ChatResult, attempt: number, retryOf: number | null, pricing?: Pricing): RequestRecord {
   const choice = r.json?.choices?.[0];
   const calls = choice?.message?.tool_calls;
   return {
@@ -74,6 +83,9 @@ function toRequestRecord(r: ChatResult, pricing?: Pricing): RequestRecord {
     errorMessage: extractErrorMessage(r),
     providerName: typeof r.json?.provider === "string" ? r.json.provider : null,
     retryAfterSec: r.retryAfterSec ?? null,
+    attempt,
+    retryOf,
+    rateLimited: is429(r),
   };
 }
 
@@ -88,6 +100,7 @@ export async function runSession(
     { role: "system", content: task.system },
     { role: "user", content: task.user },
   ];
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const requests: RequestRecord[] = [];
   let firstClass: ReturnType<typeof classifyFirst> | null = null;
   let toolCalled = false;
@@ -95,9 +108,19 @@ export async function runSession(
   let lastRes: ChatResult | null = null;
 
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
-    const res = await deps.chat(buildRequest(model, task, condition, messages, turn));
+    const body = buildRequest(model, task, condition, messages, turn);
+    let res: ChatResult;
+    let prevIdx: number | null = null;
+    for (let attempt = 1; ; attempt++) {
+      res = await deps.chat(body); // every attempt goes through the caller's rate limiter / quota
+      const idx = requests.length;
+      requests.push(toRequestRecord(res, attempt, prevIdx, deps.pricing));
+      if (!is429(res) || attempt > RETRY_DELAYS_MS.length) break;
+      await sleep(retryDelayMs(attempt, res));
+      prevIdx = idx;
+    }
     lastRes = res;
-    requests.push(toRequestRecord(res, deps.pricing));
+    // after the loop `res` is the first non-429 response, or the last 429 if all attempts were limited
     if (turn === 1) firstClass = classifyFirst(res, toolNames);
     const msg = res.ok ? res.json?.choices?.[0]?.message : undefined;
     const calls: any[] = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
@@ -143,7 +166,8 @@ export async function runSession(
     }
   }
   const e2eSuccess = condition === "schema-only" ? null : toolCorrect && schemaValid && answerCorrect;
-  const errs = requests.map((q) => q.errorMessage).filter(Boolean);
+  const superseded = new Set(requests.map((q) => q.retryOf).filter((x): x is number => typeof x === "number"));
+  const errs = requests.filter((_, i) => !superseded.has(i)).map((q) => q.errorMessage).filter(Boolean);
   const fc = firstClass!;
 
   return {
@@ -162,6 +186,7 @@ export async function runSession(
     schemaValid,
     answerCorrect,
     e2eSuccess,
+    rateLimitedAttempts: requests.filter((q) => q.rateLimited).length,
     totalLatencyMs: requests.reduce((s, q) => s + q.latencyMs, 0),
     totalCostUsd: requests.reduce((s, q) => s + (q.cost ?? 0), 0),
     finalContent: finalContent.slice(0, 2000),

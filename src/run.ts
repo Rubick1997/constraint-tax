@@ -206,14 +206,14 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
         firstOutcome: "skipped", toolCalled: false, toolCorrect: false, toolCallInText: false,
         finalJsonParsed: false, schemaValid: false, answerCorrect: false,
         e2eSuccess: s.condition === "schema-only" ? null : false,
-        totalLatencyMs: 0, totalCostUsd: 0, finalContent: "", rawError: null,
+        rateLimitedAttempts: 0, totalLatencyMs: 0, totalCostUsd: 0, finalContent: "", rawError: null,
       });
       written++;
       continue;
     }
     let rec: SessionRecord;
     try {
-      rec = await runSession({ chat: wrapChat(s.model), now: deps.now, pricing: priceOf(s.model) }, { ...s, model: mid });
+      rec = await runSession({ chat: wrapChat(s.model), now: deps.now, sleep: deps.sleep, pricing: priceOf(s.model) }, { ...s, model: mid });
     } catch (e) {
       if (e instanceof StopRun) {
         stopReason = e.message;
@@ -229,7 +229,7 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
     if (rec.firstOutcome === "unsupported") unsupportedCount.set(cell, (unsupportedCount.get(cell) ?? 0) + 1);
     else consec.set(mid, bad ? (consec.get(mid) ?? 0) + 1 : 0);
     if ((consec.get(mid) ?? 0) >= BREAKER_LIMIT) {
-      const last = rec.requests[0];
+      const last = rec.requests.at(-1);
       const ra = last?.retryAfterSec ? ` Retry-After ${last.retryAfterSec}s (capped to 60s sleep).` : "";
       stopped[mid] = `circuit breaker: ${BREAKER_LIMIT} consecutive failures; last first-turn outcome ${rec.firstOutcome}, status ${last?.status}, "${(rec.rawError ?? "").slice(0, 200)}".${ra}`;
       log(`BREAKER ${mid}: ${stopped[mid]}`);

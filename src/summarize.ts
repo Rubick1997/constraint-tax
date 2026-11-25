@@ -31,8 +31,8 @@ export function summarize(records: SessionRecord[]): string {
     (groups.get(g) ?? groups.set(g, []).get(g)!).push(r);
   }
   const rows = [
-    "| model | condition | n | tool_called | tool_missing | error_or_refusal | unsupported | rate_limited | skipped | TIR | toolCorrect | schemaValid | e2e | toolCallInText | median latency ms | cost USD |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    "| model | condition | n | tool_called | tool_missing | error_or_refusal | unsupported | rate_limited | 429s | skipped | TIR | toolCorrect | schemaValid | e2e | toolCallInText | median latency ms | cost USD |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
   ];
   for (const g of [...groups.keys()].sort()) {
     const rs = groups.get(g)!;
@@ -52,6 +52,7 @@ export function summarize(records: SessionRecord[]): string {
         c("error_or_refusal"),
         c("unsupported"),
         c("rate_limited"),
+        rs.reduce((s, r) => s + (r.rateLimitedAttempts ?? r.requests.filter((q) => q.status === 429).length), 0),
         c("skipped"),
         schemaOnly ? "-" : pct(valid.filter((r) => r.firstOutcome === "tool_called").length, d),
         schemaOnly ? "-" : pct(valid.filter((r) => r.toolCorrect).length, d),

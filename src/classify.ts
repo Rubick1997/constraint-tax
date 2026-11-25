@@ -15,6 +15,13 @@ export function extractErrorMessage(r: ChatResult): string | null {
 const UNSUPPORTED_RE =
   /no endpoints? (found|available)|can(not|'t) handle the requested|requested parameters|does(n't| not) support|not supported|unsupported (parameter|feature)|require_parameters/i;
 
+/** HTTP 429, or an HTTP 200 whose body carries error.code 429. */
+export function is429(r: ChatResult): boolean {
+  if (r.status === 429) return true;
+  const code = r.ok ? r.json?.error?.code : undefined;
+  return code === 429 || code === "429";
+}
+
 export interface Classification {
   outcome: Exclude<FirstOutcome, "skipped">;
   toolCallInText: boolean;
@@ -38,7 +45,7 @@ export function classifyFirst(r: ChatResult, toolNames: string[]): Classificatio
     message,
   });
 
-  if (r.status === 429) return done("rate_limited");
+  if (is429(r)) return done("rate_limited");
   if (r.status === 0 || !r.ok) {
     if ((r.status === 404 || r.status === 400) && UNSUPPORTED_RE.test(message ?? "")) return done("unsupported");
     return done("error_or_refusal");
@@ -59,8 +66,16 @@ export function classifyFirst(r: ChatResult, toolNames: string[]): Classificatio
   return done("tool_missing", inText);
 }
 
-/** A record is transient (worth retrying) if any request hit 429, 5xx or a network failure. */
+/**
+ * A record is transient (worth re-running) if any request hit 5xx or a network failure, or
+ * ended in a 429 that was not followed by a retry. A 429 that a later attempt retried
+ * (and got past) does not make the session transient.
+ */
 export function isTransient(record: Pick<SessionRecord, "requests" | "skipped">): boolean {
   if (record.skipped) return false;
-  return record.requests.some((q) => q.status === 429 || q.status === 0 || q.status >= 500);
+  const retried = new Set<number>();
+  for (const q of record.requests) if (typeof q.retryOf === "number") retried.add(q.retryOf);
+  return record.requests.some(
+    (q, i) => q.status === 0 || q.status >= 500 || ((q.status === 429 || q.rateLimited === true) && !retried.has(i)),
+  );
 }
