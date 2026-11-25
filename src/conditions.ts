@@ -1,4 +1,4 @@
-import type { Condition, Task } from "./types.js";
+import type { Condition, Provider, Task } from "./types.js";
 
 export type { Condition };
 
@@ -10,15 +10,26 @@ export type { Condition };
  * answer, and "required" would force another tool call forever.
  * No other condition ever sets `tool_choice`.
  */
-export function buildRequest(model: string, task: Task, condition: Condition, messages: unknown[], turn: number) {
+export function buildRequest(
+  model: string,
+  task: Task,
+  condition: Condition,
+  messages: unknown[],
+  turn: number,
+  opts: { provider?: Provider; requireParameters?: boolean } = {},
+) {
+  const provider = opts.provider ?? "openrouter";
   const body: Record<string, unknown> = {
     model,
     messages,
     temperature: 0.5,
     max_tokens: 4096,
-    provider: { require_parameters: true },
-    usage: { include: true },
   };
+  // OpenRouter-only fields. Ollama rejects/ignores them; the Anthropic adapter drops them anyway.
+  if (provider === "openrouter") {
+    if (opts.requireParameters !== false) body.provider = { require_parameters: true };
+    body.usage = { include: true };
+  }
   const hasTools = condition !== "schema-only";
   const hasSchema = condition !== "tools-only";
   if (hasTools) body.tools = task.tools;

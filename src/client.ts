@@ -12,6 +12,8 @@ export interface ClientOptions {
   baseUrl?: string;
   apiKey?: string;
   timeoutMs?: number;
+  /** false for keyless local servers (Ollama): no Authorization header, no key check. */
+  requireKey?: boolean;
 }
 
 export function createClient(opts: ClientOptions = {}): Client {
@@ -19,6 +21,7 @@ export function createClient(opts: ClientOptions = {}): Client {
   const baseUrl = (opts.baseUrl ?? process.env.OPENAI_BASE_URL ?? "https://openrouter.ai/api/v1").replace(/\/+$/, "");
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const getKey = (): string => {
+    if (opts.requireKey === false) return "";
     const k = opts.apiKey ?? process.env.OPENROUTER_API_KEY;
     if (!k) throw new Error("OPENROUTER_API_KEY is not set (needed for this call). Export it in your shell; it is never printed.");
     return k;
@@ -32,7 +35,7 @@ export function createClient(opts: ClientOptions = {}): Client {
     try {
       const res = await f(baseUrl + path, {
         method,
-        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: ctrl.signal,
       });

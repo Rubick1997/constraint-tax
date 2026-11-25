@@ -1,3 +1,5 @@
+export type Provider = "openrouter" | "anthropic" | "ollama";
+
 export interface ToolDef {
   type: "function";
   function: { name: string; description: string; parameters: object };
@@ -54,6 +56,8 @@ export interface RequestRecord {
   errorMessage: string | null;
   providerName: string | null;
   retryAfterSec: number | null;
+  /** Provider-native stop reason (Anthropic: tool_use/end_turn/...); null for OpenAI-shaped providers. */
+  rawStopReason: string | null;
   /** 1-based attempt number for this logical request (1 = first try). */
   attempt: number;
   /** Index in `requests` of the 429 attempt this one retries, or null. */
@@ -65,6 +69,9 @@ export interface RequestRecord {
 export interface SessionRecord {
   key: string;
   model: string;
+  provider: Provider;
+  /** Whether provider.require_parameters was actually sent (always false for non-openrouter). */
+  requireParameters: boolean;
   condition: Condition;
   taskId: string;
   rep: number;

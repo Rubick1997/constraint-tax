@@ -82,7 +82,7 @@ describe("runner", () => {
   });
 
   it("paid models need --max-usd and --yes; dry-run sends nothing", async () => {
-    const s = setup([{ id: "p/m", role: "closed-control", pricing: { prompt: "0.000001", completion: "0.000004" } }], { models: "controls" });
+    const s = setup([{ id: "p/m", role: "closed-control", pricing: { prompt: "0.000001", completion: "0.000004" } }], { models: "p/m" });
     const deps = s.mk(() => answerRes());
     expect((await runBench(s.opts, deps)).exitCode).toBe(2);
     expect((await runBench({ ...s.opts, maxUsd: 1 }, deps)).exitCode).toBe(2);
@@ -91,7 +91,7 @@ describe("runner", () => {
   });
 
   it("stops before exceeding --max-usd", async () => {
-    const s = setup([{ id: "p/m", role: "closed-control", pricing: { prompt: "0.000001", completion: "0.000004" } }], { models: "controls", maxUsd: 0.0001, yes: true });
+    const s = setup([{ id: "p/m", role: "closed-control", pricing: { prompt: "0.000001", completion: "0.000004" } }], { models: "p/m", maxUsd: 0.0001, yes: true });
     const r = await runBench(s.opts, s.mk(() => answerRes()));
     expect(r.stopReason).toMatch(/max-usd/);
     expect(s.calls).toHaveLength(0);

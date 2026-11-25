@@ -1,7 +1,8 @@
 import { Ajv } from "ajv";
 import { buildRequest } from "./conditions.js";
 import { classifyFirst, extractErrorMessage, is429 } from "./classify.js";
-import type { ChatResult, Condition, RequestRecord, SessionRecord, Task } from "./types.js";
+import { PROVIDER_LABEL } from "./providers.js";
+import type { ChatResult, Condition, Provider, RequestRecord, SessionRecord, Task } from "./types.js";
 import { sessionKey } from "./types.js";
 
 export const MAX_TURNS = 4;
@@ -70,7 +71,7 @@ function retryDelayMs(attempt: number, r: ChatResult): number {
   return RETRY_DELAYS_MS[attempt - 1]!;
 }
 
-function toRequestRecord(r: ChatResult, attempt: number, retryOf: number | null, pricing?: Pricing): RequestRecord {
+function toRequestRecord(r: ChatResult, attempt: number, retryOf: number | null, provider: Provider, pricing?: Pricing): RequestRecord {
   const choice = r.json?.choices?.[0];
   const calls = choice?.message?.tool_calls;
   return {
@@ -81,8 +82,9 @@ function toRequestRecord(r: ChatResult, attempt: number, retryOf: number | null,
     usage: r.json?.usage ?? null,
     cost: requestCost(r, pricing),
     errorMessage: extractErrorMessage(r),
-    providerName: typeof r.json?.provider === "string" ? r.json.provider : null,
+    providerName: PROVIDER_LABEL[provider] ?? (typeof r.json?.provider === "string" ? r.json.provider : null),
     retryAfterSec: r.retryAfterSec ?? null,
+    rawStopReason: typeof choice?.rawStopReason === "string" ? choice.rawStopReason : null,
     attempt,
     retryOf,
     rateLimited: is429(r),
@@ -91,9 +93,12 @@ function toRequestRecord(r: ChatResult, attempt: number, retryOf: number | null,
 
 export async function runSession(
   deps: SessionDeps,
-  p: { model: string; condition: Condition; task: Task; rep: number },
+  p: { model: string; condition: Condition; task: Task; rep: number; provider?: Provider; requireParameters?: boolean },
 ): Promise<SessionRecord> {
   const { model, condition, task, rep } = p;
+  const provider: Provider = p.provider ?? "openrouter";
+  // require_parameters is only ever sent to OpenRouter; record what was actually sent
+  const requireParameters = provider === "openrouter" && p.requireParameters !== false;
   const startedAt = new Date((deps.now ?? Date.now)()).toISOString();
   const toolNames = task.tools.map((t) => t.function.name);
   const messages: any[] = [
@@ -108,13 +113,13 @@ export async function runSession(
   let lastRes: ChatResult | null = null;
 
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
-    const body = buildRequest(model, task, condition, messages, turn);
+    const body = buildRequest(model, task, condition, messages, turn, { provider, requireParameters });
     let res: ChatResult;
     let prevIdx: number | null = null;
     for (let attempt = 1; ; attempt++) {
       res = await deps.chat(body); // every attempt goes through the caller's rate limiter / quota
       const idx = requests.length;
-      requests.push(toRequestRecord(res, attempt, prevIdx, deps.pricing));
+      requests.push(toRequestRecord(res, attempt, prevIdx, provider, deps.pricing));
       if (!is429(res) || attempt > RETRY_DELAYS_MS.length) break;
       await sleep(retryDelayMs(attempt, res));
       prevIdx = idx;
@@ -127,7 +132,13 @@ export async function runSession(
     if (calls.length === 0 || turn === MAX_TURNS) break;
 
     toolCalled = true;
-    messages.push({ role: "assistant", content: msg.content ?? null, tool_calls: calls });
+    messages.push({
+      role: "assistant",
+      content: msg.content ?? null,
+      tool_calls: calls,
+      // Anthropic: raw content blocks (thinking included) so the adapter can replay the turn exactly
+      ...(msg._anthropic_content ? { _anthropic_content: msg._anthropic_content } : {}),
+    });
     for (const [i, c] of calls.entries()) {
       const name: string = c?.function?.name ?? "";
       let args: any;
@@ -173,6 +184,8 @@ export async function runSession(
   return {
     key: sessionKey(model, condition, task.id, rep),
     model,
+    provider,
+    requireParameters,
     condition,
     taskId: task.id,
     rep,

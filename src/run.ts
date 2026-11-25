@@ -3,10 +3,11 @@ import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 import { createClient, type Client } from "./client.js";
+import { createAnthropicClient, createOllamaClient, providerOf } from "./providers.js";
 import { isTransient } from "./classify.js";
 import { runSession, type Pricing } from "./session.js";
 import { TASKS } from "./tasks/index.js";
-import { ALL_CONDITIONS, sessionKey, type ChatResult, type Condition, type SessionRecord, type Task } from "./types.js";
+import { ALL_CONDITIONS, sessionKey, type ChatResult, type Condition, type Provider, type SessionRecord, type Task } from "./types.js";
 
 export const EST_PROMPT_TOKENS = 1500;
 export const EST_COMPLETION_TOKENS = 400;
@@ -14,7 +15,7 @@ export const BREAKER_LIMIT = 3;
 export const UNSUPPORTED_CELL_LIMIT = 2;
 
 export interface RunOptions {
-  models: string; // "all-free" | "controls" | comma list of ids
+  models: string; // "all-free" | "anthropic" | "local" | "controls" (= anthropic) | comma list of ids
   conditions: Condition[];
   tasks: string[]; // ids or ["all"]
   reps: number;
@@ -26,10 +27,13 @@ export interface RunOptions {
   modelsFile: string;
   quotaFile: string;
   intervalMs: number;
+  /** Probe: omit provider.require_parameters on OpenRouter requests. No effect for other providers. */
+  noRequireParameters?: boolean;
 }
 
 export interface RunDeps {
-  client: Client;
+  client: Client; // default client for every provider unless `clientFor` is given
+  clientFor?: (provider: Provider) => Client;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
   log: (s: string) => void;
@@ -48,6 +52,7 @@ class StopRun extends Error {}
 
 interface FrozenModel {
   id: string;
+  provider?: Provider;
   role: string;
   pricing?: { prompt?: string; completion?: string } | null;
 }
@@ -55,7 +60,10 @@ interface FrozenModel {
 function priceOf(m: FrozenModel): Pricing {
   return { prompt: Number(m.pricing?.prompt ?? 0) || 0, completion: Number(m.pricing?.completion ?? 0) || 0 };
 }
-const isFree = (id: string) => id.endsWith(":free");
+/** Counts toward the OpenRouter free-tier daily quota. */
+const isFreeQuota = (m: FrozenModel) => providerOf(m) === "openrouter" && m.id.endsWith(":free");
+/** Gated by --max-usd/--yes and spend tracking: Anthropic and non-free OpenRouter. Ollama is free. */
+const isPaid = (m: FrozenModel) => providerOf(m) === "anthropic" || (providerOf(m) === "openrouter" && !m.id.endsWith(":free"));
 const estRequests = (c: Condition) => (c === "schema-only" ? 1 : 2);
 
 async function readRecords(file: string): Promise<Map<string, SessionRecord>> {
@@ -82,8 +90,9 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
   const { log } = deps;
   const frozen: FrozenModel[] = JSON.parse(await readFile(opts.modelsFile, "utf8")).models;
   let selected: FrozenModel[];
-  if (opts.models === "all-free") selected = frozen.filter((m) => m.role === "free");
-  else if (opts.models === "controls") selected = frozen.filter((m) => m.role !== "free");
+  if (opts.models === "all-free") selected = frozen.filter((m) => providerOf(m) === "openrouter" && m.role === "free");
+  else if (opts.models === "anthropic" || opts.models === "controls") selected = frozen.filter((m) => providerOf(m) === "anthropic");
+  else if (opts.models === "local") selected = frozen.filter((m) => providerOf(m) === "ollama");
   else {
     const ids = opts.models.split(",").map((s) => s.trim()).filter(Boolean);
     const missing = ids.filter((id) => !frozen.some((m) => m.id === id));
@@ -112,16 +121,19 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
   let paidUsd = 0;
   for (const s of pending) {
     const n = estRequests(s.condition);
-    if (isFree(s.model.id)) freeReqs += n;
-    else {
+    if (isFreeQuota(s.model)) freeReqs += n;
+    else if (isPaid(s.model)) {
       const p = priceOf(s.model);
       paidReqs += n;
       paidUsd += n * (EST_PROMPT_TOKENS * p.prompt + EST_COMPLETION_TOKENS * p.completion);
     }
   }
-  const hasPaid = selected.some((m) => !isFree(m.id));
+  const hasPaid = selected.some(isPaid);
+  const hasOpenRouter = selected.some((m) => providerOf(m) === "openrouter");
+  const requireParameters = !opts.noRequireParameters;
   log(`Sessions total: ${planned.length} (already done: ${planned.length - pending.length}, pending: ${pending.length})`);
   log(`Projected requests (pending, est. 2 per tool session, 1 for schema-only): free ${freeReqs}, paid ${paidReqs}`);
+  log(`provider.require_parameters: ${requireParameters ? "ON" : "OFF (--no-require-parameters)"}${hasOpenRouter ? "" : " (no OpenRouter models selected: no effect)"}`);
   log(`Free-quota days at ${opts.freeLimit}/day: ${(freeReqs / opts.freeLimit).toFixed(2)}`);
   if (hasPaid) log(`Paid projection (est. ${EST_PROMPT_TOKENS} prompt + ${EST_COMPLETION_TOKENS} completion tokens/request): $${paidUsd.toFixed(4)}`);
 
@@ -131,8 +143,9 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
     return { exitCode: 2, written: 0, stopped: {}, spentUsd: 0 };
   }
 
-  try {
-    const info = await deps.client.getKeyInfo();
+  const clientOf = (p: Provider): Client => deps.clientFor?.(p) ?? deps.client;
+  if (hasOpenRouter) try {
+    const info = await clientOf("openrouter").getKeyInfo();
     const pick = Object.fromEntries(Object.entries(info).filter(([k]) => /usage|limit/i.test(k)));
     log(`Key info: ${JSON.stringify(pick)}`);
   } catch (e: any) {
@@ -158,21 +171,25 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
   let notBefore = 0;
   let spent = 0;
   const wrapChat = (model: FrozenModel) => async (body: any): Promise<ChatResult> => {
-    const free = isFree(model.id);
+    const free = isFreeQuota(model);
+    const paid = isPaid(model);
+    const local = providerOf(model) === "ollama";
     const p = priceOf(model);
     if (free && (quota[today()] ?? 0) + 1 > opts.freeLimit) throw new StopRun(`free quota limit ${opts.freeLimit} reached for ${today()}`);
-    if (!free && opts.maxUsd !== undefined) {
+    if (paid && opts.maxUsd !== undefined) {
       const est = EST_PROMPT_TOKENS * p.prompt + EST_COMPLETION_TOKENS * p.completion;
       if (spent + est > opts.maxUsd) throw new StopRun(`--max-usd ${opts.maxUsd} would be exceeded (spent $${spent.toFixed(4)})`);
     }
-    const wait = Math.max(lastAt + opts.intervalMs, notBefore) - deps.now();
-    if (wait > 0) await deps.sleep(wait);
+    if (!local) {
+      const wait = Math.max(lastAt + opts.intervalMs, notBefore) - deps.now();
+      if (wait > 0) await deps.sleep(wait);
+    }
     lastAt = deps.now();
     if (free) await bumpQuota();
-    const res = await deps.client.chat(body);
+    const res = await clientOf(providerOf(model)).chat(body);
     lastAt = deps.now();
     if (res.status === 429 && res.retryAfterSec) notBefore = deps.now() + Math.min(res.retryAfterSec, 60) * 1000;
-    if (!free) {
+    if (paid) {
       const u = res.json?.usage;
       spent += typeof u?.cost === "number" ? u.cost : u ? (u.prompt_tokens ?? 0) * p.prompt + (u.completion_tokens ?? 0) * p.completion : 0;
     }
@@ -201,7 +218,7 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
     const cell = `${mid}|${s.condition}`;
     if ((unsupportedCount.get(cell) ?? 0) >= UNSUPPORTED_CELL_LIMIT) {
       await append({
-        key: s.key, model: mid, condition: s.condition, taskId: s.task.id, rep: s.rep,
+        key: s.key, model: mid, provider: providerOf(s.model), requireParameters: providerOf(s.model) === "openrouter" && requireParameters, condition: s.condition, taskId: s.task.id, rep: s.rep,
         startedAt: new Date(deps.now()).toISOString(), skipped: "unsupported-cell", requests: [],
         firstOutcome: "skipped", toolCalled: false, toolCorrect: false, toolCallInText: false,
         finalJsonParsed: false, schemaValid: false, answerCorrect: false,
@@ -213,7 +230,7 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
     }
     let rec: SessionRecord;
     try {
-      rec = await runSession({ chat: wrapChat(s.model), now: deps.now, sleep: deps.sleep, pricing: priceOf(s.model) }, { ...s, model: mid });
+      rec = await runSession({ chat: wrapChat(s.model), now: deps.now, sleep: deps.sleep, pricing: priceOf(s.model) }, { ...s, model: mid, provider: providerOf(s.model), requireParameters });
     } catch (e) {
       if (e instanceof StopRun) {
         stopReason = e.message;
@@ -251,9 +268,10 @@ function cli() {
       "max-usd": { type: "string" },
       yes: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
+      "no-require-parameters": { type: "boolean", default: false },
     },
   });
-  if (!values.models) throw new Error("--models <ids|all-free|controls> is required");
+  if (!values.models) throw new Error("--models <ids|all-free|anthropic|local|controls> is required");
   const conditions = values.conditions === "all" ? ALL_CONDITIONS : (values.conditions!.split(",") as Condition[]);
   for (const c of conditions) if (!ALL_CONDITIONS.includes(c)) throw new Error(`unknown condition ${c}`);
   const dry = values["dry-run"]!;
@@ -271,9 +289,12 @@ function cli() {
     modelsFile: "bench/models.json",
     quotaFile: "bench/quota.json",
     intervalMs: 3100,
+    noRequireParameters: values["no-require-parameters"],
   };
+  const clients: Partial<Record<Provider, Client>> = {};
   return runBench(opts, {
     client: createClient(),
+    clientFor: (p) => (clients[p] ??= p === "anthropic" ? createAnthropicClient() : p === "ollama" ? createOllamaClient() : createClient()),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     now: Date.now,
     log: (s) => console.log(s),

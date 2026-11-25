@@ -1,8 +1,8 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import type { FetchLike } from "./client.js";
 
-export type Role = "free" | "closed-control" | "open-paid-control";
+export type Role = "free" | "closed-control" | "local";
 
 export const PINNED: { id: string; role: Role }[] = [
   ...[
@@ -15,8 +15,7 @@ export const PINNED: { id: string; role: Role }[] = [
     "google/gemma-4-31b-it:free",
     "google/gemma-4-26b-a4b-it:free",
   ].map((id) => ({ id, role: "free" as const })),
-  { id: "openai/gpt-5.4-mini", role: "closed-control" },
-  { id: "google/gemma-4-31b-it", role: "open-paid-control" },
+  // Paid controls now run on Anthropic (provider "anthropic"), not OpenRouter; see bench/models.json.
 ];
 
 const SUBSET = ["tools", "tool_choice", "response_format", "structured_outputs"];
@@ -29,13 +28,17 @@ async function getJson(f: FetchLike, url: string): Promise<any> {
   return JSON.parse(await res.text());
 }
 
-export async function freeze(f: FetchLike, now: Date = new Date()) {
+/**
+ * `existing` = the models currently in bench/models.json. Entries whose provider is not
+ * "openrouter" (anthropic, ollama) are hand-maintained and copied through unchanged.
+ */
+export async function freeze(f: FetchLike, now: Date = new Date(), existing: any[] = []) {
   const all: any[] = (await getJson(f, `${BASE}/models`)).data ?? [];
   const byId = new Map(all.map((m) => [m.id, m]));
   const missing = PINNED.filter((p) => !byId.has(p.id)).map((p) => p.id);
   if (missing.length) throw new Error(`Pinned models missing from /models: ${missing.join(", ")}`);
 
-  const models = [];
+  const models: any[] = [];
   for (const p of PINNED) {
     const m = byId.get(p.id);
     let endpoints: any[] = [];
@@ -61,6 +64,7 @@ export async function freeze(f: FetchLike, now: Date = new Date()) {
     if (epError) notes.push(`endpoints fetch failed: ${epError}`);
     models.push({
       id: p.id,
+      provider: "openrouter",
       role: p.role,
       maker: p.id.split("/")[0],
       huggingFaceId: m.hugging_face_id || null,
@@ -71,6 +75,8 @@ export async function freeze(f: FetchLike, now: Date = new Date()) {
       notes,
     });
   }
+
+  for (const m of existing) if (m?.provider && m.provider !== "openrouter") models.push(m);
 
   const candidates = all
     .filter((m) => typeof m.id === "string" && m.id.endsWith(":free") && m.id !== "openrouter/free")
@@ -95,7 +101,13 @@ export async function freeze(f: FetchLike, now: Date = new Date()) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  freeze((u, i) => fetch(u, i))
+  let existing: any[] = [];
+  try {
+    existing = JSON.parse(readFileSync("bench/models.json", "utf8")).models ?? [];
+  } catch {
+    /* first freeze */
+  }
+  freeze((u, i) => fetch(u, i), new Date(), existing)
     .then(({ frozen, candidates }) => {
       mkdirSync("bench", { recursive: true });
       writeFileSync("bench/models.json", JSON.stringify(frozen, null, 2) + "\n");
