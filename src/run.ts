@@ -13,6 +13,7 @@ export const EST_PROMPT_TOKENS = 1500;
 export const EST_COMPLETION_TOKENS = 400;
 export const BREAKER_LIMIT = 3;
 export const UNSUPPORTED_CELL_LIMIT = 2;
+export const COOLDOWN_MS = 60_000;
 
 export interface RunOptions {
   models: string; // "all-free" | "anthropic" | "local" | "controls" (= anthropic) | comma list of ids
@@ -154,13 +155,16 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
 
   // quota
   const today = () => new Date(deps.now()).toISOString().slice(0, 10);
-  let quota: Record<string, number> = {};
-  try {
-    quota = JSON.parse(await readFile(opts.quotaFile, "utf8"));
-  } catch {
-    /* fresh */
-  }
+  // Read-modify-write against the file every time: another process may have changed it.
+  const readQuota = async (): Promise<Record<string, number>> => {
+    try {
+      return JSON.parse(await readFile(opts.quotaFile, "utf8"));
+    } catch {
+      return {};
+    }
+  };
   const bumpQuota = async () => {
+    const quota = await readQuota();
     quota[today()] = (quota[today()] ?? 0) + 1;
     await mkdir(dirname(opts.quotaFile), { recursive: true });
     await writeFile(opts.quotaFile, JSON.stringify(quota, null, 2) + "\n");
@@ -175,7 +179,7 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
     const paid = isPaid(model);
     const local = providerOf(model) === "ollama";
     const p = priceOf(model);
-    if (free && (quota[today()] ?? 0) + 1 > opts.freeLimit) throw new StopRun(`free quota limit ${opts.freeLimit} reached for ${today()}`);
+    if (free && ((await readQuota())[today()] ?? 0) + 1 > opts.freeLimit) throw new StopRun(`free quota limit ${opts.freeLimit} reached for ${today()}`);
     if (paid && opts.maxUsd !== undefined) {
       const est = EST_PROMPT_TOKENS * p.prompt + EST_COMPLETION_TOKENS * p.completion;
       if (spent + est > opts.maxUsd) throw new StopRun(`--max-usd ${opts.maxUsd} would be exceeded (spent $${spent.toFixed(4)})`);
@@ -210,11 +214,35 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
       unsupportedCount.set(c, (unsupportedCount.get(c) ?? 0) + 1);
     }
 
+  // Round-robin over per-model queues (each in condition/task/rep order); deterministic.
+  const queues = new Map<string, typeof pending>();
+  for (const m of selected) if (!queues.has(m.id)) queues.set(m.id, []);
+  for (const s of pending) queues.get(s.model.id)!.push(s);
+  const order = [...queues.keys()];
+  const cooldownUntil = new Map<string, number>();
+  let cursor = 0;
   let written = 0;
   let stopReason: string | undefined;
-  for (const s of pending) {
-    const mid = s.model.id;
-    if (stopped[mid]) continue;
+  const live = (id: string) => !stopped[id] && queues.get(id)!.length > 0;
+
+  for (;;) {
+    const remaining = order.filter(live);
+    if (!remaining.length) break;
+    let mid: string | undefined;
+    for (let i = 0; i < order.length; i++) {
+      const id = order[(cursor + i) % order.length]!;
+      if (live(id) && (cooldownUntil.get(id) ?? 0) <= deps.now()) {
+        mid = id;
+        cursor = (cursor + i + 1) % order.length;
+        break;
+      }
+    }
+    if (mid === undefined) {
+      const earliest = Math.min(...remaining.map((id) => cooldownUntil.get(id) ?? 0));
+      await deps.sleep(Math.max(earliest - deps.now(), 1));
+      continue;
+    }
+    const s = queues.get(mid)!.shift()!;
     const cell = `${mid}|${s.condition}`;
     if ((unsupportedCount.get(cell) ?? 0) >= UNSUPPORTED_CELL_LIMIT) {
       await append({
@@ -241,6 +269,7 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
     }
     await append(rec);
     written++;
+    if (rec.rateLimitedAttempts > 0) cooldownUntil.set(mid, deps.now() + COOLDOWN_MS);
 
     const bad = rec.firstOutcome === "error_or_refusal" || rec.firstOutcome === "rate_limited" || isTransient(rec);
     if (rec.firstOutcome === "unsupported") unsupportedCount.set(cell, (unsupportedCount.get(cell) ?? 0) + 1);

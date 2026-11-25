@@ -131,4 +131,61 @@ describe("runner", () => {
     expect(s.lines()).toHaveLength(3);
     expect(s.calls).toHaveLength(12);
   });
+
+  const okFor = (b: any) => (b.messages.length === 2 ? toolCallRes() : answerRes());
+  const r429: ChatResult = { ok: false, status: 429, latencyMs: 1, rawText: "", json: { error: { message: "rate-limited" } } };
+  const sessionModels = (lines: SessionRecord[]) => lines.map((l) => l.model);
+
+  it("orders sessions round-robin across models", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }, { id: "b/y:free", role: "free" }, { id: "c/z:free", role: "free" }], { tasks: ["t01", "t02"] });
+    await runBench(s.opts, s.mk(okFor));
+    expect(sessionModels(s.lines())).toEqual(["a/x:free", "b/y:free", "c/z:free", "a/x:free", "b/y:free", "c/z:free"]);
+  });
+
+  it("skips a model whose breaker opened and keeps rotating the rest", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }, { id: "b/y:free", role: "free" }, { id: "c/z:free", role: "free" }]);
+    const r = await runBench(s.opts, s.mk((b) => (b.model === "b/y:free" ? status(500) : okFor(b))));
+    expect(Object.keys(r.stopped)).toEqual(["b/y:free"]);
+    const order = sessionModels(s.lines());
+    expect(order.slice(0, 9)).toEqual(["a/x:free", "b/y:free", "c/z:free", "a/x:free", "b/y:free", "c/z:free", "a/x:free", "b/y:free", "c/z:free"]);
+    expect(order.slice(9)).toEqual(["a/x:free", "c/z:free", "a/x:free", "c/z:free"]);
+    expect(order.filter((m) => m === "b/y:free")).toHaveLength(3);
+  });
+
+  it("cools a 429'd model down for 60s while other models proceed", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }, { id: "b/y:free", role: "free" }], { tasks: ["t01", "t02"], intervalMs: 0 });
+    let aFirst = true;
+    const starts: Record<string, number[]> = { "a/x:free": [], "b/y:free": [] };
+    const deps = s.mk((b) => {
+      if (b.model === "a/x:free" && aFirst) { aFirst = false; return r429; }
+      return okFor(b);
+    });
+    await runBench(s.opts, deps);
+    for (const l of s.lines()) starts[l.model]!.push(Date.parse(l.startedAt));
+    expect(sessionModels(s.lines())).toEqual(["a/x:free", "b/y:free", "b/y:free", "a/x:free"]);
+    const a1End = starts["b/y:free"]![0]!; // b's first session starts right after a's first ended
+    expect(starts["a/x:free"]![1]! - a1End).toBeGreaterThanOrEqual(60_000 - 100);
+    expect(s.sleeps.some((x) => x >= 50_000)).toBe(true);
+  });
+
+  it("sleeps until the earliest cooldown when every model is cooling down", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }], { tasks: ["t01", "t02"], intervalMs: 0 });
+    let first = true;
+    await runBench(s.opts, s.mk((b) => (first ? ((first = false), r429) : okFor(b))));
+    expect(s.sleeps.some((x) => x >= 60_000 - 100)).toBe(true);
+  });
+
+  it("quota is read-modify-write per request (external change is honoured)", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }], { tasks: ["t01"] });
+    writeFileSync(s.opts.quotaFile, JSON.stringify({ "2026-11-24": 2 }));
+    const deps = s.mk((b) => {
+      if (s.calls.length === 1) writeFileSync(s.opts.quotaFile, JSON.stringify({ "2026-11-24": 40, "2026-11-23": 7 }));
+      return okFor(b);
+    });
+    await runBench(s.opts, deps);
+    expect(s.calls).toHaveLength(2);
+    const q = JSON.parse(readFileSync(s.opts.quotaFile, "utf8"));
+    expect(q["2026-11-24"]).toBe(41); // 40 set mid-run, +1
+    expect(q["2026-11-23"]).toBe(7);
+  });
 });
