@@ -1,0 +1,1177 @@
+[
+  {
+    "id": "t01",
+    "domain": "order-lookup",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Where is order QX-48213? Answer as a JSON object with three fields: status (the order's status code exactly as the system reports it), tracking_number (the carrier tracking number), and eta_days (whole days until the delivery estimate).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_order_status",
+          "description": "Look up the current status, tracking number and delivery estimate of an order.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "Order ID, e.g. AB-12345"
+              }
+            },
+            "required": [
+              "order_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_invoice",
+          "description": "Look up the invoice total for an order.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "Order ID, e.g. AB-12345"
+              }
+            },
+            "required": [
+              "order_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_order_status",
+    "expectedArgs": {
+      "order_id": "QX-48213"
+    },
+    "schema": {
+      "name": "order_status",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "tracking_number": {
+            "type": "string"
+          },
+          "eta_days": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "tracking_number",
+          "eta_days"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t02",
+    "domain": "unit-conversion",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Convert 42 zorbits to meters. The zorbit is a made-up unit, so use the tool for the conversion. Answer as a JSON object with two fields: original_value (the number of zorbits given) and meters (the length in meters).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "convert_zorbit",
+          "description": "Convert a length in zorbits (a company-internal unit) to meters.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "number",
+                "description": "Length in zorbits"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "convert_temperature",
+          "description": "Convert a temperature between Celsius and Fahrenheit.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "number",
+                "description": "Temperature value"
+              },
+              "to_scale": {
+                "type": "string",
+                "description": "Target scale: C or F"
+              }
+            },
+            "required": [
+              "value",
+              "to_scale"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "convert_zorbit",
+    "expectedArgs": {
+      "value": 42
+    },
+    "schema": {
+      "name": "zorbit_conversion",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "original_value": {
+            "type": "number"
+          },
+          "meters": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "original_value",
+          "meters"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t03",
+    "domain": "weather",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "What is the weather in Velmora Heights right now? Answer as a JSON object with three fields: condition (a short lowercase word for the sky/precipitation as reported), temp_c (temperature in Celsius) and wind_kph (wind speed in km/h).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get current weather conditions for a city.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "City name"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_air_quality",
+          "description": "Get the current air quality index for a city.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "City name"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_weather",
+    "expectedArgs": {
+      "city": "Velmora Heights"
+    },
+    "schema": {
+      "name": "weather_report",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "condition": {
+            "type": "string"
+          },
+          "temp_c": {
+            "type": "number"
+          },
+          "wind_kph": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "condition",
+          "temp_c",
+          "wind_kph"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t04",
+    "domain": "inventory",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Check stock for SKU BX-7731-QZ. Answer as a JSON object with three fields: on_hand (units in stock, integer), warehouse (the warehouse code holding it) and reorder_flag (true or false, whether a reorder has been flagged).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "check_stock",
+          "description": "Check current stock level, warehouse and reorder flag for a SKU.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string",
+                "description": "SKU code"
+              }
+            },
+            "required": [
+              "sku"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_supplier_info",
+          "description": "Get the supplier name and lead time for a SKU.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string",
+                "description": "SKU code"
+              }
+            },
+            "required": [
+              "sku"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "check_stock",
+    "expectedArgs": {
+      "sku": "BX-7731-QZ"
+    },
+    "schema": {
+      "name": "stock_report",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "on_hand": {
+            "type": "integer"
+          },
+          "warehouse": {
+            "type": "string"
+          },
+          "reorder_flag": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "on_hand",
+          "warehouse",
+          "reorder_flag"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t05",
+    "domain": "exchange-rate",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Convert 250 KRV (Karvian rupel) to TLM (Tolmar mark) at the current rate. Answer as a JSON object with two fields: rate (units of TLM per 1 KRV) and converted_amount (the TLM amount for 250 KRV).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_exchange_rate",
+          "description": "Get the current exchange rate between two currencies.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "base": {
+                "type": "string",
+                "description": "Base currency code"
+              },
+              "quote": {
+                "type": "string",
+                "description": "Quote currency code"
+              }
+            },
+            "required": [
+              "base",
+              "quote"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_rate_history",
+          "description": "Get the 30-day average exchange rate between two currencies.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "base": {
+                "type": "string",
+                "description": "Base currency code"
+              },
+              "quote": {
+                "type": "string",
+                "description": "Quote currency code"
+              }
+            },
+            "required": [
+              "base",
+              "quote"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_exchange_rate",
+    "expectedArgs": {
+      "base": "KRV",
+      "quote": "TLM"
+    },
+    "schema": {
+      "name": "conversion",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "rate": {
+            "type": "number"
+          },
+          "converted_amount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "rate",
+          "converted_amount"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t06",
+    "domain": "shipping-quote",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Get a shipping quote for a 12.5 kg parcel from Port Halvard to Lindqvist Bay. Answer as a JSON object with three fields: price_usd (the quoted price), carrier (carrier name) and transit_days (whole days in transit).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_shipping_quote",
+          "description": "Get a shipping quote for a parcel between two cities.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "origin_city": {
+                "type": "string",
+                "description": "Origin city"
+              },
+              "dest_city": {
+                "type": "string",
+                "description": "Destination city"
+              },
+              "weight_kg": {
+                "type": "number",
+                "description": "Parcel weight in kg"
+              }
+            },
+            "required": [
+              "origin_city",
+              "dest_city",
+              "weight_kg"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_customs_fee",
+          "description": "Estimate customs fees for a parcel between two countries.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "origin_country": {
+                "type": "string",
+                "description": "Origin country"
+              },
+              "dest_country": {
+                "type": "string",
+                "description": "Destination country"
+              }
+            },
+            "required": [
+              "origin_country",
+              "dest_country"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_shipping_quote",
+    "expectedArgs": {
+      "origin_city": "Port Halvard",
+      "dest_city": "Lindqvist Bay",
+      "weight_kg": 12.5
+    },
+    "schema": {
+      "name": "shipping_quote",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "price_usd": {
+            "type": "number"
+          },
+          "carrier": {
+            "type": "string"
+          },
+          "transit_days": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "price_usd",
+          "carrier",
+          "transit_days"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t07",
+    "domain": "booking",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Reserve a table at Marrowfield Bistro on 2026-12-03 for 4 people. Answer as a JSON object with three fields: confirmation_code (the reservation code), table (the table label) and time (the reserved time, HH:MM).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "reserve_table",
+          "description": "Reserve a restaurant table and return the confirmation.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "restaurant": {
+                "type": "string",
+                "description": "Restaurant name"
+              },
+              "date": {
+                "type": "string",
+                "description": "Date, YYYY-MM-DD"
+              },
+              "party_size": {
+                "type": "integer",
+                "description": "Number of guests"
+              }
+            },
+            "required": [
+              "restaurant",
+              "date",
+              "party_size"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_restaurants",
+          "description": "Search restaurants by cuisine in a city.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "City name"
+              },
+              "cuisine": {
+                "type": "string",
+                "description": "Cuisine type"
+              }
+            },
+            "required": [
+              "city",
+              "cuisine"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "reserve_table",
+    "expectedArgs": {
+      "restaurant": "Marrowfield Bistro",
+      "date": "2026-12-03",
+      "party_size": 4
+    },
+    "schema": {
+      "name": "reservation",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "confirmation_code": {
+            "type": "string"
+          },
+          "table": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_code",
+          "table",
+          "time"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t08",
+    "domain": "flight-status",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "What is the status of flight VK2291? Answer as a JSON object with three fields: status (the status word as reported), gate (the departure gate) and delay_minutes (whole minutes of delay).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_flight_status",
+          "description": "Get live status, gate and delay for a flight.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "flight_number": {
+                "type": "string",
+                "description": "Flight number, e.g. AB1234"
+              }
+            },
+            "required": [
+              "flight_number"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_baggage_info",
+          "description": "Get the baggage carousel for a flight.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "flight_number": {
+                "type": "string",
+                "description": "Flight number, e.g. AB1234"
+              }
+            },
+            "required": [
+              "flight_number"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_flight_status",
+    "expectedArgs": {
+      "flight_number": "VK2291"
+    },
+    "schema": {
+      "name": "flight_status",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "gate": {
+            "type": "string"
+          },
+          "delay_minutes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "gate",
+          "delay_minutes"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t09",
+    "domain": "asset-tracking",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Look up asset tag AT-90412. Answer as a JSON object with three fields: location (where the asset is housed), owner_team (the team that owns it) and warranty_expires (the warranty end date, YYYY-MM-DD).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup_asset",
+          "description": "Look up location, owning team and warranty of an asset by tag.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "asset_tag": {
+                "type": "string",
+                "description": "Asset tag, e.g. AT-00000"
+              }
+            },
+            "required": [
+              "asset_tag"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup_vendor",
+          "description": "Look up vendor contact details by vendor code.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "vendor_code": {
+                "type": "string",
+                "description": "Vendor code"
+              }
+            },
+            "required": [
+              "vendor_code"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "lookup_asset",
+    "expectedArgs": {
+      "asset_tag": "AT-90412"
+    },
+    "schema": {
+      "name": "asset_info",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string"
+          },
+          "owner_team": {
+            "type": "string"
+          },
+          "warranty_expires": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "location",
+          "owner_team",
+          "warranty_expires"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t10",
+    "domain": "tariff-lookup",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "What import duty applies to product code PRD-5521 shipped to Orlanda? Answer as a JSON object with two fields: duty_percent (the duty rate as a percentage number) and requires_license (true or false).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_tariff_rate",
+          "description": "Get the import duty percentage and license requirement for a product code and destination country.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "product_code": {
+                "type": "string",
+                "description": "Product code, e.g. PRD-0000"
+              },
+              "country": {
+                "type": "string",
+                "description": "Destination country"
+              }
+            },
+            "required": [
+              "product_code",
+              "country"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_product_description",
+          "description": "Get the catalog description of a product code.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "product_code": {
+                "type": "string",
+                "description": "Product code"
+              }
+            },
+            "required": [
+              "product_code"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_tariff_rate",
+    "expectedArgs": {
+      "product_code": "PRD-5521",
+      "country": "Orlanda"
+    },
+    "schema": {
+      "name": "tariff",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "duty_percent": {
+            "type": "number"
+          },
+          "requires_license": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "duty_percent",
+          "requires_license"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t11",
+    "domain": "scheduling",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Find the next free slot for a tire rotation at Harbrook Service Center. Answer as a JSON object with three fields: date (YYYY-MM-DD), time (HH:MM) and slot_id (the slot identifier).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "find_next_slot",
+          "description": "Find the next available appointment slot for a service at a service center.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "center": {
+                "type": "string",
+                "description": "Service center name"
+              },
+              "service": {
+                "type": "string",
+                "description": "Service name"
+              }
+            },
+            "required": [
+              "center",
+              "service"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_center_hours",
+          "description": "Get opening hours of a service center.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "center": {
+                "type": "string",
+                "description": "Service center name"
+              }
+            },
+            "required": [
+              "center"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "find_next_slot",
+    "expectedArgs": {
+      "center": "Harbrook Service Center",
+      "service": "tire rotation"
+    },
+    "schema": {
+      "name": "slot",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "slot_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "time",
+          "slot_id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t12",
+    "domain": "library",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Is catalog item CAT-88214 available? Answer as a JSON object with three fields: copies_available (integer), branch (the branch holding the copies) and due_back (the date the next loaned copy is due back, YYYY-MM-DD).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_book_copies",
+          "description": "Get availability of a library catalog item.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "catalog_id": {
+                "type": "string",
+                "description": "Catalog ID, e.g. CAT-00000"
+              }
+            },
+            "required": [
+              "catalog_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_author_info",
+          "description": "Get the author biography for a catalog item.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "catalog_id": {
+                "type": "string",
+                "description": "Catalog ID"
+              }
+            },
+            "required": [
+              "catalog_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_book_copies",
+    "expectedArgs": {
+      "catalog_id": "CAT-88214"
+    },
+    "schema": {
+      "name": "availability",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "copies_available": {
+            "type": "integer"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "due_back": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "copies_available",
+          "branch",
+          "due_back"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t13",
+    "domain": "support-ticket",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Look up support ticket TCK-70392. Answer as a JSON object with three fields: priority (the priority code), assignee_queue (the queue it is assigned to) and opened_hours_ago (whole hours since it was opened).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_ticket",
+          "description": "Get priority, assigned queue and age of a support ticket.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "ticket_id": {
+                "type": "string",
+                "description": "Ticket ID, e.g. TCK-00000"
+              }
+            },
+            "required": [
+              "ticket_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_customer_plan",
+          "description": "Get the subscription plan of a customer account.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string",
+                "description": "Account ID"
+              }
+            },
+            "required": [
+              "account_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_ticket",
+    "expectedArgs": {
+      "ticket_id": "TCK-70392"
+    },
+    "schema": {
+      "name": "ticket",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "priority": {
+            "type": "string"
+          },
+          "assignee_queue": {
+            "type": "string"
+          },
+          "opened_hours_ago": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "priority",
+          "assignee_queue",
+          "opened_hours_ago"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t14",
+    "domain": "meter-reading",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Read utility meter MTR-4408-ZP. Answer as a JSON object with three fields: kwh (the cumulative reading in kWh), last_read (the date of the last reading, YYYY-MM-DD) and tariff (the tariff name).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_meter_reading",
+          "description": "Get the latest reading, read date and tariff of a utility meter.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "meter_id": {
+                "type": "string",
+                "description": "Meter ID, e.g. MTR-0000-AA"
+              }
+            },
+            "required": [
+              "meter_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_outage_status",
+          "description": "Get outage status for a district.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "district": {
+                "type": "string",
+                "description": "District name"
+              }
+            },
+            "required": [
+              "district"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_meter_reading",
+    "expectedArgs": {
+      "meter_id": "MTR-4408-ZP"
+    },
+    "schema": {
+      "name": "meter",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "kwh": {
+            "type": "number"
+          },
+          "last_read": {
+            "type": "string"
+          },
+          "tariff": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kwh",
+          "last_read",
+          "tariff"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "id": "t15",
+    "domain": "parcel-locker",
+    "system": "You are an operations assistant at a fictional company. Always use the provided tools to look up facts; never guess values. When you have what you need, reply with a single JSON object and nothing else.",
+    "user": "Where do I collect parcel PC-6620-HV? Answer as a JSON object with three fields: locker (the locker label), pin (the pickup PIN as a string) and station (the station name).",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_locker_code",
+          "description": "Get the locker label, pickup PIN and station for a parcel.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "parcel_id": {
+                "type": "string",
+                "description": "Parcel ID, e.g. PC-0000-AA"
+              }
+            },
+            "required": [
+              "parcel_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_station_hours",
+          "description": "Get opening hours of a parcel station.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "station": {
+                "type": "string",
+                "description": "Station name"
+              }
+            },
+            "required": [
+              "station"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "expectedTool": "get_locker_code",
+    "expectedArgs": {
+      "parcel_id": "PC-6620-HV"
+    },
+    "schema": {
+      "name": "pickup",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "locker": {
+            "type": "string"
+          },
+          "pin": {
+            "type": "string"
+          },
+          "station": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "locker",
+          "pin",
+          "station"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+]
