@@ -1,0 +1,170 @@
+import { Ajv } from "ajv";
+import { buildRequest } from "./conditions.js";
+import { classifyFirst, extractErrorMessage } from "./classify.js";
+import type { ChatResult, Condition, RequestRecord, SessionRecord, Task } from "./types.js";
+import { sessionKey } from "./types.js";
+
+export const MAX_TURNS = 4;
+const ajv = new Ajv({ strict: false });
+
+export interface Pricing {
+  prompt: number;
+  completion: number;
+}
+
+export interface SessionDeps {
+  chat: (body: any) => Promise<ChatResult>;
+  now?: () => number;
+  pricing?: Pricing; // fallback when response has no usage.cost
+}
+
+export function parseFinalJson(content: string): unknown | undefined {
+  const trimmed = content.trim();
+  const fenced = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  for (const cand of [fenced, trimmed]) {
+    try {
+      return JSON.parse(cand);
+    } catch {
+      /* try next */
+    }
+  }
+  const a = trimmed.indexOf("{");
+  const b = trimmed.lastIndexOf("}");
+  if (a >= 0 && b > a) {
+    try {
+      return JSON.parse(trimmed.slice(a, b + 1));
+    } catch {
+      /* fallthrough */
+    }
+  }
+  return undefined;
+}
+
+function norm(v: unknown): unknown {
+  return typeof v === "string" ? v.trim().toLowerCase() : v;
+}
+
+export function argsMatch(actual: any, expected: Record<string, string | number>): boolean {
+  if (!actual || typeof actual !== "object") return false;
+  return Object.entries(expected).every(([k, ev]) => {
+    const av = actual[k];
+    if (typeof ev === "number") return typeof av === "number" ? Math.abs(av - ev) <= 1e-6 : Math.abs(Number(av) - ev) <= 1e-6;
+    return norm(av) === norm(ev);
+  });
+}
+
+function requestCost(r: ChatResult, pricing?: Pricing): number | null {
+  const u = r.json?.usage;
+  if (typeof u?.cost === "number") return u.cost;
+  if (pricing && u && typeof u.prompt_tokens === "number")
+    return u.prompt_tokens * pricing.prompt + (u.completion_tokens ?? 0) * pricing.completion;
+  return null;
+}
+
+function toRequestRecord(r: ChatResult, pricing?: Pricing): RequestRecord {
+  const choice = r.json?.choices?.[0];
+  const calls = choice?.message?.tool_calls;
+  return {
+    status: r.status,
+    latencyMs: r.latencyMs,
+    finishReason: choice?.finish_reason ?? null,
+    toolCallNames: Array.isArray(calls) ? calls.map((c: any) => c?.function?.name ?? "?") : [],
+    usage: r.json?.usage ?? null,
+    cost: requestCost(r, pricing),
+    errorMessage: extractErrorMessage(r),
+    providerName: typeof r.json?.provider === "string" ? r.json.provider : null,
+    retryAfterSec: r.retryAfterSec ?? null,
+  };
+}
+
+export async function runSession(
+  deps: SessionDeps,
+  p: { model: string; condition: Condition; task: Task; rep: number },
+): Promise<SessionRecord> {
+  const { model, condition, task, rep } = p;
+  const startedAt = new Date((deps.now ?? Date.now)()).toISOString();
+  const toolNames = task.tools.map((t) => t.function.name);
+  const messages: any[] = [
+    { role: "system", content: task.system },
+    { role: "user", content: task.user },
+  ];
+  const requests: RequestRecord[] = [];
+  let firstClass: ReturnType<typeof classifyFirst> | null = null;
+  let toolCalled = false;
+  let toolCorrect = false;
+  let lastRes: ChatResult | null = null;
+
+  for (let turn = 1; turn <= MAX_TURNS; turn++) {
+    const res = await deps.chat(buildRequest(model, task, condition, messages, turn));
+    lastRes = res;
+    requests.push(toRequestRecord(res, deps.pricing));
+    if (turn === 1) firstClass = classifyFirst(res, toolNames);
+    const msg = res.ok ? res.json?.choices?.[0]?.message : undefined;
+    const calls: any[] = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+    if (calls.length === 0 || turn === MAX_TURNS) break;
+
+    toolCalled = true;
+    messages.push({ role: "assistant", content: msg.content ?? null, tool_calls: calls });
+    for (const [i, c] of calls.entries()) {
+      const name: string = c?.function?.name ?? "";
+      let args: any;
+      let out: unknown;
+      try {
+        args = JSON.parse(c?.function?.arguments ?? "{}");
+      } catch {
+        args = undefined;
+      }
+      if (name === task.expectedTool && argsMatch(args, task.expectedArgs)) toolCorrect = true;
+      if (!(name in task.impl)) out = { error: "unknown tool" };
+      else if (args === undefined || args === null || typeof args !== "object") out = { error: "invalid arguments" };
+      else {
+        try {
+          out = task.impl[name]!(args);
+        } catch {
+          out = { error: "invalid arguments" };
+        }
+      }
+      messages.push({ role: "tool", tool_call_id: c?.id ?? `call_${i}`, content: JSON.stringify(out) });
+    }
+  }
+  if (requests[0] && requests[0].toolCallNames.length > 0) toolCalled = true;
+
+  const finalMsg = lastRes?.ok ? lastRes.json?.choices?.[0]?.message : undefined;
+  const finalContent: string = typeof finalMsg?.content === "string" ? finalMsg.content : "";
+  const parsed = finalContent ? parseFinalJson(finalContent) : undefined;
+  const finalJsonParsed = parsed !== undefined && parsed !== null && typeof parsed === "object";
+  const schemaValid = finalJsonParsed && ajv.validate(task.schema.schema, parsed) === true;
+  let answerCorrect = false;
+  if (finalJsonParsed) {
+    try {
+      answerCorrect = task.checkAnswer(parsed) === true;
+    } catch {
+      answerCorrect = false;
+    }
+  }
+  const e2eSuccess = condition === "schema-only" ? null : toolCorrect && schemaValid && answerCorrect;
+  const errs = requests.map((q) => q.errorMessage).filter(Boolean);
+  const fc = firstClass!;
+
+  return {
+    key: sessionKey(model, condition, task.id, rep),
+    model,
+    condition,
+    taskId: task.id,
+    rep,
+    startedAt,
+    requests,
+    firstOutcome: fc.outcome,
+    toolCalled,
+    toolCorrect,
+    toolCallInText: fc.toolCallInText,
+    finalJsonParsed,
+    schemaValid,
+    answerCorrect,
+    e2eSuccess,
+    totalLatencyMs: requests.reduce((s, q) => s + q.latencyMs, 0),
+    totalCostUsd: requests.reduce((s, q) => s + (q.cost ?? 0), 0),
+    finalContent: finalContent.slice(0, 2000),
+    rawError: errs.length ? errs.join(" || ").slice(0, 1000) : null,
+  };
+}

@@ -1,0 +1,1 @@
+{"status":200,"json":{"id":"gen-1","provider":"FakeProv","choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_order_status","arguments":"{\"order_id\":\"QX-48213\"}"}}]}}],"usage":{"prompt_tokens":120,"completion_tokens":20,"cost":0}}}

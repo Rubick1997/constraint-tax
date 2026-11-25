@@ -1,0 +1,1 @@
+{"status":200,"json":{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"<tool_call>{\"name\":\"get_order_status\",\"arguments\":{\"order_id\":\"QX-48213\"}}</tool_call>"}}]}}
