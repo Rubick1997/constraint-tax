@@ -1,0 +1,14 @@
+{
+  "name": "tool-schema-safe",
+  "version": "0.1.0",
+  "description": "Get tool calls AND schema-valid JSON from chat endpoints that drop tools when response_format is on.",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "license": "MIT",
+  "dependencies": {
+    "ajv": "^8.20.0"
+  }
+}
