@@ -19,12 +19,13 @@ These are the 8 free models that advertise `tools` plus `response_format` and/or
 
 Excluded: the free endpoints for nemotron-3.5-lightning, nemotron-3-ultra and nemotron-3-nano-omni advertise tools but no `response_format`, and `openrouter/free` is a router.
 
-**Paid controls:**
-- `openai/gpt-5.4-mini` is the closed control. It is also the paper's closed reference model.
-- `google/gemma-4-31b-it` (paid, 18 endpoints) is the open-paid control. It compares the same weights on a different endpoint.
+**Controls:**
+- `claude-haiku-5-5` via the Anthropic API is the closed control.
+- Three local Ollama models share weights with free endpoints (or, for qwen3.6, with the paper): `lfm3:1.7b`, `gemma4:26b-a4b` and `qwen3.6:35b-a3b`. Ollama 0.40.18, MLX engine with xgrammar.
+- The OpenRouter paid controls (`openai/gpt-5.4-mini`, paid `google/gemma-4-31b-it`) were dropped.
 
 ## Smoke test
-Planned: 1 task × 4 conditions × 2 models, ≈14 free requests. Status: **pending.** It needs `OPENROUTER_API_KEY`.
+Done, 24-25 Nov 2026. Results are in `runs/smoke-*.jsonl` (`smoke-local-brew-noxgrammar.jsonl` shows the Homebrew Ollama build lacks xgrammar and returns 501 for structured output).
 
 ## Projections
 | Run | Sessions | Requests (est.) |
@@ -32,11 +33,11 @@ Planned: 1 task × 4 conditions × 2 models, ≈14 free requests. Status: **pend
 | Main, free (8 × 4 × 15 × 2) | 960 | ~1,680 |
 | Workarounds, free (8 × 2 strategies × 15 × 2, ~2 req each) | 480 | ~960 |
 | **Free total** | | **~2,640 → 3 days at 900/day** |
-| Main, paid controls | 240 | ~420 → **~$0.71** |
-| Workarounds, paid controls | 120 | ~240 → **~$0.40** |
-| **Paid total** | | **~$1.1 (cap with `--max-usd 3`)** |
+| Main, Claude control (1 × 4 × 15 × 2) | 120 | ~210 (actual cost about $0.03) |
+| Main, local Ollama (3 × 4 × 15 × 2) | 360 | free, runs on the local machine |
+| Workarounds, Claude control and local | 60 + 180 | small |
 
-The cost estimate assumes 1,500 prompt + 400 completion tokens per request. GPT-5.4-mini accounts for about 95% of the paid cost.
+Actual numbers are in `results/summary.md`. The free run was cut short by upstream rate limits on some models.
 
 ## npm
 Both `tool-schema-safe` and `constraint-tax` are unclaimed on npm (404, 24 Nov 2026).
