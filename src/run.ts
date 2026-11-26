@@ -143,7 +143,7 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
   const hasOpenRouter = selected.some((m) => providerOf(m) === "openrouter");
   const requireParameters = !opts.noRequireParameters;
   log(`Sessions total: ${planned.length} (already done: ${planned.length - pending.length}, pending: ${pending.length})`);
-  log(`Projected requests (pending, est. 2 per tool session, 1 for schema-only): free ${freeReqs}, paid ${paidReqs}`);
+  log(`Projected requests (pending, est. 2 per tool session, 1 for schema-only, 3 for wa-two-phase): free ${freeReqs}, paid ${paidReqs}`);
   log(`provider.require_parameters: ${requireParameters ? "ON" : "OFF (--no-require-parameters)"}${hasOpenRouter ? "" : " (no OpenRouter models selected: no effect)"}`);
   log(`Free-quota days at ${opts.freeLimit}/day: ${(freeReqs / opts.freeLimit).toFixed(2)}`);
   if (hasPaid) log(`Paid projection (est. ${EST_PROMPT_TOKENS} prompt + ${EST_COMPLETION_TOKENS} completion tokens/request): $${paidUsd.toFixed(4)}`);
