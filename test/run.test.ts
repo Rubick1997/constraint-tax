@@ -2,7 +2,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runBench, type RunOptions } from "../src/run.js";
+import { parseConditions, runBench, type RunOptions } from "../src/run.js";
+import { summarizeWorkarounds } from "../src/summarize.js";
 import { TASKS } from "../src/tasks/index.js";
 import type { ChatResult, SessionRecord } from "../src/types.js";
 import type { Client } from "../src/client.js";
@@ -187,5 +188,57 @@ describe("runner", () => {
     const q = JSON.parse(readFileSync(s.opts.quotaFile, "utf8"));
     expect(q["2026-11-24"]).toBe(41); // 40 set mid-run, +1
     expect(q["2026-11-23"]).toBe(7);
+  });
+});
+
+describe("workaround conditions", () => {
+  const submit = (): ChatResult => ({ ok: true, status: 200, latencyMs: 1, rawText: "", json: { choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls: [{ id: "s", type: "function", function: { name: "submit_answer", arguments: '{"status":"held_at_customs","tracking_number":"ZK8-55107-T","eta_days":6}' } }] } }] } });
+
+  it("parseConditions: all excludes workarounds; workarounds alias; unknown throws", () => {
+    expect(parseConditions("all")).toEqual(["tools-only", "schema-only", "tools+schema", "tools+schema+required"]);
+    expect(parseConditions("workarounds")).toEqual(["wa-two-phase", "wa-answer-as-tool"]);
+    expect(parseConditions("wa-two-phase,tools-only")).toEqual(["wa-two-phase", "tools-only"]);
+    expect(() => parseConditions("nope")).toThrow();
+  });
+
+  it("dry-run projects 3 requests for wa-two-phase and 2 for wa-answer-as-tool", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }], { conditions: ["wa-two-phase", "wa-answer-as-tool"], tasks: ["t01"], dryRun: true });
+    const logs: string[] = [];
+    const deps = { ...s.mk(() => answerRes()), log: (l: string) => logs.push(l) };
+    await runBench(s.opts, deps);
+    expect(logs.join("\n")).toMatch(/free 5/);
+    expect(s.calls).toHaveLength(0);
+  });
+
+  it("runs both workarounds end to end, counting every request in quota", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }], { conditions: ["wa-two-phase", "wa-answer-as-tool"], tasks: ["t01"] });
+    const deps = s.mk((b) => {
+      const names = (b.tools ?? []).map((t: any) => t.function.name);
+      if (names.includes("submit_answer")) return b.messages.some((m: any) => m.role === "tool") ? submit() : toolCallRes();
+      if (b.response_format) return answerRes();
+      return b.messages.some((m: any) => m.role === "tool") ? { ...answerRes(), json: { choices: [{ finish_reason: "stop", message: { content: "done" } }] } } : toolCallRes();
+    });
+    await runBench(s.opts, deps);
+    const recs = new Map(s.lines().map((r) => [r.condition, r]));
+    const tp = recs.get("wa-two-phase")!;
+    const aat = recs.get("wa-answer-as-tool")!;
+    for (const r of [tp, aat]) {
+      expect(r).toMatchObject({ toolCalled: true, toolCorrect: true, schemaValid: true, answerCorrect: true, e2eSuccess: true, firstOutcome: "tool_called" });
+      expect(r.key).toMatch(/\|wa-/);
+    }
+    expect(tp.requests).toHaveLength(3);
+    expect(aat.requests).toHaveLength(2);
+    expect(JSON.parse(readFileSync(s.opts.quotaFile, "utf8"))["2026-11-24"]).toBe(5);
+    // resume: nothing pending
+    s.calls.length = 0;
+    await runBench(s.opts, s.mk(() => answerRes()));
+    expect(s.calls).toHaveLength(0);
+  });
+
+  it("summarizeWorkarounds reports mean calls and median latency", async () => {
+    const s = setup([{ id: "a/x:free", role: "free" }], { conditions: ["wa-two-phase"], tasks: ["t01"] });
+    await runBench(s.opts, s.mk((b) => (b.response_format ? answerRes() : b.messages.some((m: any) => m.role === "tool") ? { ...answerRes(), json: { choices: [{ finish_reason: "stop", message: { content: "x" } }] } } : toolCallRes())));
+    const t = summarizeWorkarounds(s.lines());
+    expect(t).toMatch(/wa-two-phase \| 1 \| 1\/1 \(100%\) \| 3\.00 \| 3/);
   });
 });
