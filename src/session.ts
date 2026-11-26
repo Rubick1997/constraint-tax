@@ -58,7 +58,7 @@ export function argsMatch(actual: any, expected: Record<string, string | number>
   });
 }
 
-function requestCost(r: ChatResult, pricing?: Pricing): number | null {
+export function requestCost(r: ChatResult, pricing?: Pricing): number | null {
   const u = r.json?.usage;
   if (typeof u?.cost === "number") return u.cost;
   if (pricing && u && typeof u.prompt_tokens === "number")
@@ -66,12 +66,12 @@ function requestCost(r: ChatResult, pricing?: Pricing): number | null {
   return null;
 }
 
-function retryDelayMs(attempt: number, r: ChatResult): number {
+export function retryDelayMs(attempt: number, r: ChatResult): number {
   if (r.retryAfterSec && r.retryAfterSec > 0) return Math.min(r.retryAfterSec * 1000, MAX_RETRY_AFTER_MS);
   return RETRY_DELAYS_MS[attempt - 1]!;
 }
 
-function toRequestRecord(r: ChatResult, attempt: number, retryOf: number | null, provider: Provider, pricing?: Pricing): RequestRecord {
+export function toRequestRecord(r: ChatResult, attempt: number, retryOf: number | null, provider: Provider, pricing?: Pricing): RequestRecord {
   const choice = r.json?.choices?.[0];
   const calls = choice?.message?.tool_calls;
   return {

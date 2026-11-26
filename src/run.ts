@@ -7,7 +7,8 @@ import { createAnthropicClient, createOllamaClient, providerOf } from "./provide
 import { isTransient } from "./classify.js";
 import { runSession, type Pricing } from "./session.js";
 import { TASKS } from "./tasks/index.js";
-import { ALL_CONDITIONS, sessionKey, type ChatResult, type Condition, type Provider, type SessionRecord, type Task } from "./types.js";
+import { runWorkaroundSession } from "./workaround.js";
+import { ALL_CONDITIONS, WORKAROUND_CONDITIONS, isWorkaround, sessionKey, type AnyCondition, type ChatResult, type Provider, type SessionRecord, type Task } from "./types.js";
 
 export const EST_PROMPT_TOKENS = 1500;
 export const EST_COMPLETION_TOKENS = 400;
@@ -17,7 +18,7 @@ export const COOLDOWN_MS = 60_000;
 
 export interface RunOptions {
   models: string; // "all-free" | "anthropic" | "local" | "controls" (= anthropic) | comma list of ids
-  conditions: Condition[];
+  conditions: AnyCondition[];
   tasks: string[]; // ids or ["all"]
   reps: number;
   out: string;
@@ -65,7 +66,16 @@ function priceOf(m: FrozenModel): Pricing {
 const isFreeQuota = (m: FrozenModel) => providerOf(m) === "openrouter" && m.id.endsWith(":free");
 /** Gated by --max-usd/--yes and spend tracking: Anthropic and non-free OpenRouter. Ollama is free. */
 const isPaid = (m: FrozenModel) => providerOf(m) === "anthropic" || (providerOf(m) === "openrouter" && !m.id.endsWith(":free"));
-const estRequests = (c: Condition) => (c === "schema-only" ? 1 : 2);
+const estRequests = (c: AnyCondition) => (c === "schema-only" ? 1 : c === "wa-two-phase" ? 3 : 2);
+
+/** "all" = the 4 original conditions only; "workarounds" = the 2 wa-* conditions; otherwise a comma list. */
+export function parseConditions(spec: string): AnyCondition[] {
+  if (spec === "all") return [...ALL_CONDITIONS];
+  if (spec === "workarounds") return [...WORKAROUND_CONDITIONS];
+  const list = spec.split(",").map((s) => s.trim()).filter(Boolean) as AnyCondition[];
+  for (const c of list) if (!ALL_CONDITIONS.includes(c as any) && !isWorkaround(c)) throw new Error(`unknown condition ${c}`);
+  return list;
+}
 
 async function readRecords(file: string): Promise<Map<string, SessionRecord>> {
   const map = new Map<string, SessionRecord>();
@@ -105,7 +115,7 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
   const taskById = new Map(tasks.map((t) => [t.id, t]));
 
   const existing = await readRecords(opts.out);
-  const planned: { model: FrozenModel; condition: Condition; task: Task; rep: number; key: string }[] = [];
+  const planned: { model: FrozenModel; condition: AnyCondition; task: Task; rep: number; key: string }[] = [];
   for (const model of selected)
     for (const condition of opts.conditions)
       for (const task of tasks)
@@ -258,7 +268,9 @@ export async function runBench(opts: RunOptions, deps: RunDeps): Promise<RunResu
     }
     let rec: SessionRecord;
     try {
-      rec = await runSession({ chat: wrapChat(s.model), now: deps.now, sleep: deps.sleep, pricing: priceOf(s.model) }, { ...s, model: mid, provider: providerOf(s.model), requireParameters });
+      const sdeps = { chat: wrapChat(s.model), now: deps.now, sleep: deps.sleep, pricing: priceOf(s.model) };
+      const sp = { model: mid, task: s.task, rep: s.rep, provider: providerOf(s.model), requireParameters };
+      rec = isWorkaround(s.condition) ? await runWorkaroundSession(sdeps, { ...sp, condition: s.condition }) : await runSession(sdeps, { ...sp, condition: s.condition });
     } catch (e) {
       if (e instanceof StopRun) {
         stopReason = e.message;
@@ -301,8 +313,7 @@ function cli() {
     },
   });
   if (!values.models) throw new Error("--models <ids|all-free|anthropic|local|controls> is required");
-  const conditions = values.conditions === "all" ? ALL_CONDITIONS : (values.conditions!.split(",") as Condition[]);
-  for (const c of conditions) if (!ALL_CONDITIONS.includes(c)) throw new Error(`unknown condition ${c}`);
+  const conditions = parseConditions(values.conditions!);
   const dry = values["dry-run"]!;
   if (!values.out && !dry) throw new Error("--out bench/runs/<name>.jsonl is required");
   const opts: RunOptions = {

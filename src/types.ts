@@ -28,6 +28,12 @@ export const ALL_CONDITIONS: Condition[] = [
   "tools+schema+required",
 ];
 
+/** Workaround strategies run through packages/tool-schema-safe (never part of "all"). */
+export type WorkaroundCondition = "wa-two-phase" | "wa-answer-as-tool";
+export const WORKAROUND_CONDITIONS: WorkaroundCondition[] = ["wa-two-phase", "wa-answer-as-tool"];
+export type AnyCondition = Condition | WorkaroundCondition;
+export const isWorkaround = (c: string): c is WorkaroundCondition => (WORKAROUND_CONDITIONS as string[]).includes(c);
+
 export interface ChatResult {
   ok: boolean;
   status: number; // 0 = network error / timeout
@@ -72,7 +78,7 @@ export interface SessionRecord {
   provider: Provider;
   /** Whether provider.require_parameters was actually sent (always false for non-openrouter). */
   requireParameters: boolean;
-  condition: Condition;
+  condition: AnyCondition;
   taskId: string;
   rep: number;
   startedAt: string;
