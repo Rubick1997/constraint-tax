@@ -8,6 +8,7 @@
     "tasks:dump": "tsx src/tasks/dump.ts",
     "bench": "tsx src/run.ts",
     "summarize": "tsx src/summarize.ts",
+    "report": "tsx src/report.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
