@@ -9,6 +9,8 @@
     "bench": "tsx src/run.ts",
     "summarize": "tsx src/summarize.ts",
     "report": "tsx src/report.ts",
+    "demo": "tsx src/demo/run.ts",
+    "demo:summary": "tsx src/demo/summarize.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
