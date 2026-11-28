@@ -36,7 +36,7 @@ Full tables, confidence intervals, failure breakdown and per-session data: [`res
 
 ## The fix
 
-[`packages/tool-schema-safe`](packages/tool-schema-safe) wraps a chat function and picks a strategy that keeps tools and schema compatible: `two-phase` (tools first, schema in a second tool-less call), `answer-as-tool` (the schema becomes the parameters of a `submit_answer` function), or `auto` (try native, fall back after a silent drop).
+[`packages/tool-schema-safe`](packages/tool-schema-safe) wraps a chat function and picks a strategy that keeps tools and schema compatible: `two-phase` (tools first, schema in a second tool-less call), `answer-as-tool` (the schema becomes the parameters of a `submit_answer` function), or `auto` (try native, fall back to `answer-as-tool` after a silent drop or a 4xx).
 
 ```ts
 import { withToolsAndSchema, type ChatFn } from "tool-schema-safe";

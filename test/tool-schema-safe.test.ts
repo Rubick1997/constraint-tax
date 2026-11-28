@@ -117,24 +117,27 @@ describe("answer-as-tool", () => {
 });
 
 describe("auto", () => {
-  it("falls back to two-phase after a silent drop, remembers it, then goes straight to two-phase", async () => {
+  it("falls back to answer-as-tool after a silent drop, remembers it, then goes straight to answer-as-tool", async () => {
     const s = script([
       reply(text('{"status":"guess"}')), // native: tools offered, none called
-      reply(toolMsg()), reply(text("done")), reply(text('{"status":"ok"}')), // two-phase rerun
+      reply(toolMsg()), reply(toolMsg("submit_answer", { status: "ok" })), // answer-as-tool rerun
     ]);
     const r = await withToolsAndSchema(s.chat, base("auto"));
     expect(r.fellBack).toBe(true);
-    expect(r.strategyUsed).toBe("two-phase");
-    expect(r.calls).toBe(4);
+    expect(r.strategyUsed).toBe("answer-as-tool");
+    expect(r.calls).toBe(3);
     expect(r.answer).toEqual({ status: "ok" });
+    expect(r.toolCalls.map((c) => c.name)).toEqual(["lookup"]);
+    expect(s.bodies[1].response_format).toBeUndefined();
     expect(getAutoStatus("m")).toBe("native-broken");
 
-    const s2 = script([reply(toolMsg()), reply(text("done")), reply(text('{"status":"ok"}'))]);
+    const s2 = script([reply(toolMsg()), reply(toolMsg("submit_answer", { status: "ok" }))]);
     const r2 = await withToolsAndSchema(s2.chat, base("auto"));
     expect(r2.fellBack).toBeUndefined();
-    expect(r2.strategyUsed).toBe("two-phase");
-    expect(r2.calls).toBe(3);
+    expect(r2.strategyUsed).toBe("answer-as-tool");
+    expect(r2.calls).toBe(2);
     expect(s2.bodies[0].response_format).toBeUndefined();
+    expect(s2.bodies[0].tools.map((t: any) => t.function.name)).toContain("submit_answer");
   });
   it("keeps native when the tool is called", async () => {
     const s = script([reply(toolMsg()), reply(text('{"status":"ok"}'))]);
@@ -145,10 +148,11 @@ describe("auto", () => {
     expect(getAutoStatus("m")).toBe("native-ok");
   });
   it("a 4xx on native triggers fallback", async () => {
-    const s = script([httpErr(400), reply(toolMsg()), reply(text("done")), reply(text('{"status":"ok"}'))]);
+    const s = script([httpErr(400), reply(toolMsg()), reply(toolMsg("submit_answer", { status: "ok" }))]);
     const r = await withToolsAndSchema(s.chat, base("auto"));
     expect(r.fellBack).toBe(true);
-    expect(r.calls).toBe(4);
+    expect(r.strategyUsed).toBe("answer-as-tool");
+    expect(r.calls).toBe(3);
     expect(r.validated).toBe(true);
     expect(getAutoStatus("m")).toBe("native-broken");
   });

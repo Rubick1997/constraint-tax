@@ -291,8 +291,8 @@ export async function withToolsAndSchema(chat: ChatFn, o: Options): Promise<Resu
     else {
       const known = memory.get(o.model);
       if (known === "native-broken") {
-        strategyUsed = "two-phase";
-        out = await run("two-phase");
+        strategyUsed = "answer-as-tool";
+        out = await run("answer-as-tool");
       } else {
         strategyUsed = "native";
         let broken = false;
@@ -309,9 +309,11 @@ export async function withToolsAndSchema(chat: ChatFn, o: Options): Promise<Resu
         if (broken) {
           memory.set(o.model, "native-broken");
           fellBack = true;
-          strategyUsed = "two-phase";
+          // answer-as-tool, not two-phase: it needs only tool support, while two-phase's
+          // second call needs response_format, which some tool-capable endpoints lack.
+          strategyUsed = "answer-as-tool";
           ctx.toolCalls = [];
-          out = await run("two-phase");
+          out = await run("answer-as-tool");
         } else if (o.tools.length > 0 && ctx.firstTurnToolCalled === true) memory.set(o.model, "native-ok");
       }
     }
