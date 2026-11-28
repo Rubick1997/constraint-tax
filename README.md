@@ -87,9 +87,34 @@ pnpm test && pnpm typecheck
 
 Runs are resumable: an existing output file is read and finished sessions are skipped. Design notes and the paper's setup are in [`bench/README.md`](bench/README.md) and [`bench/PAPER.md`](bench/PAPER.md).
 
+## Brain/worker demo
+
+Can a free local model do the tool work while a stronger model only plans and checks, and what does that save? `src/demo` measures it on 10 composite tasks (6 chains of 4 to 6 tool calls, 4 "bulky" ones where a single tool returns 12k to 22k tokens of JSON that must be filtered or aggregated). Every task has a strict output schema and a deterministic gold answer computed from fake data, checked field by field.
+
+Arms:
+
+- `sonnet-solo`, `haiku-solo`: the Claude model gets the task, all tools and the schema, and runs a normal tool loop (tools plus native structured output; no forced `tool_choice` is ever sent).
+- `worker-solo:<model>`: a local Ollama model does the whole task alone, through `withToolsAndSchema` with `answer-as-tool`.
+- `brain-worker:<model>`: Sonnet plans from tool names and parameter schemas only (it never sees tool output), the local worker executes each small step and keeps the raw tool output, then Sonnet checks the structured step results and writes the final answer. It may ask for one step to be re-run, once per session.
+
+Claude calls, tokens and cost are recorded separately from worker calls and latency. Local workers run at temperature 0; Claude arms use default sampling and thinking.
+
+```sh
+pnpm demo --arms all --reps 2 --dry-run                         # projected Claude calls and dollars, sends nothing
+pnpm demo --arms worker-solo,brain-worker --reps 2              # needs a local Ollama; the brain calls still need the gate below
+pnpm demo --arms all --reps 2 --max-usd 3 --yes                 # Claude arms refuse to run without BOTH flags
+pnpm demo:summary                                               # writes results/demo.md, results/demo.csv and the block below
+```
+
+Default workers are `lfm3:1.7b` and `gemma4:26b-a4b` (`--arms worker-solo:<model>` or `brain-worker:<model>` for others). Output goes to `bench/demo/runs/demo.jsonl` and is resumable per `arm|task|rep`; the run stops when actual Claude spend reaches `--max-usd`. Local servers often default to a small context window; set it large enough for the bulky payloads, or the worker arms will fail on those tasks for reasons unrelated to the model.
+
+<!-- demo:start -->
+_No results yet. Run `pnpm demo` and `pnpm demo:summary`._
+<!-- demo:end -->
+
 ## Data policy
 
-All prompts, tools and tool outputs are synthetic (15 fake lookup tasks in `src/tasks`, dumped to `bench/tasks.json`); no real user data is sent anywhere. Free endpoints may log prompts and completions, so do not point this benchmark at private data.
+All prompts, tools and tool outputs are synthetic (15 fake lookup tasks in `src/tasks`, dumped to `bench/tasks.json`, and the 10 demo tasks in `src/demo`); no real user data is sent anywhere. Free endpoints may log prompts and completions, so do not point this benchmark at private data.
 
 ## Credit
 
